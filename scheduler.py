@@ -76,6 +76,21 @@ def weekly_retune_all():
                 logger.info(f"[Scheduler] {ticker}: insufficient data, skipping")
                 continue
             tune_hyperparameters(ticker, X, y, force=True)
+            
+            from pipeline.lstm_model import train_lstm
+            from pipeline.meta_learner import train_meta_learner
+
+            try:
+                df_full = X.copy()
+                df_full['target'] = y
+                signals_df = pd.read_sql(f"SELECT date, close FROM signals WHERE ticker = '{ticker}'", con=engine)
+                signals_df.set_index("date", inplace=True)
+                df_full['close'] = signals_df.loc[df_full.index, 'close']
+                train_lstm(ticker, df_full.copy(), force=True)
+                logger.info(f"[Scheduler] {ticker}: LSTM retrained")
+            except Exception as e:
+                logger.error(f"[Scheduler] {ticker}: LSTM retrain failed — {e}")
+
         except Exception as e:
             logger.error(f"[Scheduler] {ticker}: retuning failed — {e}")
 

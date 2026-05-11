@@ -92,7 +92,11 @@ def init_db():
         """))
 
         # Add new columns if they do not already exist (safe migration)
-        new_columns = ["ema_50", "bb_upper", "bb_lower", "hurst"]
+        new_columns = [
+            "ema_50", "bb_upper", "bb_lower", "hurst",
+            "sector_rel_5d", "sector_rel_10d", "sector_rel_20d",
+            "earnings_surprise"  # new
+        ]
         for col in new_columns:
             try:
                 with conn.begin_nested():
@@ -119,11 +123,23 @@ def init_db():
                 usdinr              REAL,
                 india_vix           REAL,
                 nifty_5d_return     REAL,
-                nifty_20d_return    REAL
+                nifty_20d_return    REAL,
+                fii_net_flow        REAL,
+                dii_net_flow        REAL
             )
         """))
 
+        # Add new macro columns (safe migration)
+        macro_new_columns = ["fii_net_flow", "dii_net_flow"]
+        for col in macro_new_columns:
+            try:
+                with conn.begin_nested():
+                    conn.execute(text(f"ALTER TABLE macro ADD COLUMN {col} REAL"))
+            except Exception:
+                pass  # Column already exists, skip
+
         # Add indexes for faster querying by ticker and date
+
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ohlcv_ticker_date ON ohlcv (ticker, date)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_signals_ticker_date ON signals (ticker, date)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sentiment_ticker_date ON sentiment (ticker, date)"))
@@ -169,6 +185,21 @@ def init_db():
                 mape                     REAL,
                 directional_accuracy     REAL,
                 last_updated             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS model_metadata (
+                ticker              TEXT PRIMARY KEY,
+                xgb_mape            REAL,
+                xgb_dir_acc         REAL,
+                lstm_val_mape       REAL,
+                lstm_epochs_trained INTEGER,
+                meta_xgb_coef       REAL,
+                meta_lstm_coef      REAL,
+                meta_hurst_coef     REAL,
+                ensemble_in_use     INTEGER DEFAULT 1,
+                last_trained        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
 

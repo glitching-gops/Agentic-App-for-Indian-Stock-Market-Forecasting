@@ -10,16 +10,23 @@ from sklearn.metrics import mean_absolute_percentage_error
 from data.db import get_engine
 from data.tickers import TICKERS
 from pipeline.tuning import tune_hyperparameters, expanding_window_cv
+from pipeline.lstm_model import train_lstm, predict_lstm, LSTM_FEATURES
+from pipeline.meta_learner import train_meta_learner, predict_ensemble
 
 FEATURES = [
+    # Technical signals (20)
     "rsi", "macd_hist", "bb_width", "obv", "sma_20",
     "ema_9", "ema_21", "ema_50", "atr_14", "stoch_k",
     "williams_r", "roc_10", "vroc_10", "prox_52w",
     "lag1_ret", "lag5_ret", "dev_sma50", "bb_upper",
     "bb_lower", "hurst",
-    # External signals joined from other tables
-    "sentiment_score", "usdinr", "india_vix",
-    "nifty_5d_return", "nifty_20d_return",
+    # Sentiment
+    "sentiment_score",
+    # Macro signals
+    "usdinr", "india_vix", "nifty_5d_return", "nifty_20d_return",
+    # New signals — Track A
+    "sector_rel_5d", "sector_rel_10d", "sector_rel_20d",
+    "earnings_surprise",
 ]
 TARGET   = "target"
 
@@ -60,11 +67,12 @@ def load_features_for_ticker(ticker: str, engine):
     # Map sentiment (fallback to 0.0 for historical dates without sentiment data)
     df["sentiment_score"] = df.index.map(lambda d: daily_sentiment_avg.get(d, 0.0))
     
-    # Replace inf with NaN
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    
-    # Drop rows with any NaN features
-    df.dropna(subset=FEATURES, inplace=True)
+    # Defensive feature filling
+    for col in FEATURES:
+        if col not in df.columns:
+            print(f"[Model] {ticker}: feature '{col}' not found — filling with 0.0")
+            df[col] = 0.0
+        df[col] = df[col].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     
     if len(df) < 50:
         return pd.DataFrame(), pd.Series()
@@ -80,7 +88,7 @@ def train_and_forecast(single_ticker=None):
     results = {}
     
     # Create models dir if not exists
-    os.makedirs(os.path.join(os.path.dirname(__file__), "..", "models"), exist_ok=True)
+    os.makedirs(os.path.join(os.path.dirname(__file__), "..", "models", "joblib"), exist_ok=True)
     
     for ticker in tickers_to_process:
         print(f"Training model for {ticker}...")
@@ -134,7 +142,7 @@ def train_and_forecast(single_ticker=None):
         print(f"{ticker} -> CV MAPE: {mape:.2f}%, Dir Acc: {directional_accuracy:.2f}%")
         
         # Save model
-        model_path = os.path.join(os.path.dirname(__file__), "..", "models", f"{ticker}.joblib")
+        model_path = os.path.join(os.path.dirname(__file__), "..", "models", "joblib", f"{ticker}.joblib")
         joblib.dump(model, model_path)
 
         # Forecast: use the most recent row (where target is NaN)
@@ -158,16 +166,112 @@ def train_and_forecast(single_ticker=None):
         else:
             confidence = "Low"
 
+        df_full = X.copy()
+        df_full['target'] = y
+        df_full['close'] = signals_df.loc[df_full.index, 'close']
+
+        # ── LSTM training ────────────────────────────────────────────────────────────
+        print(f"[Model] {ticker}: training LSTM...")
+        try:
+            lstm_result = train_lstm(ticker, df_full.copy(), force=False)
+            lstm_price = predict_lstm(ticker, df_full.copy())
+            lstm_device = lstm_result.get("device")
+        except Exception as e:
+            print(f"[Model] {ticker}: LSTM failed — {e}")
+            lstm_price = None
+            lstm_device = "cpu"
+            lstm_result = {}
+
+        # ── Meta-learner training ────────────────────────────────────────────────────
+        try:
+            val_df = df_full.iloc[split_idx:n].copy()
+            lstm_val_preds = []
+
+            for i in range(len(val_df)):
+                context_start = max(0, split_idx + i - 30)
+                context_df    = df_full.iloc[context_start:split_idx + i].copy()
+                pred = predict_lstm(ticker, context_df)
+                lstm_val_preds.append(pred if pred is not None else y_pred_test[i])
+
+            lstm_val_preds = np.array(lstm_val_preds)
+            hurst_val      = X_test["hurst"].values if "hurst" in X_test.columns \
+                             else np.full(len(y_test), 0.5)
+
+            meta = train_meta_learner(
+                ticker,
+                xgb_val_preds  = y_pred_test,
+                lstm_val_preds = lstm_val_preds,
+                hurst_val      = hurst_val,
+                y_val          = y_test.values,
+                force          = False
+            )
+        except Exception as e:
+            print(f"[Model] {ticker}: meta-learner training failed — {e}")
+            meta = None
+
+        # ── Ensemble final forecast ──────────────────────────────────────────────────
+        current_hurst  = float(df_full["hurst"].iloc[-1]) \
+                         if "hurst" in df_full.columns else 0.5
+
+        ensemble_price = predict_ensemble(
+            ticker        = ticker,
+            xgb_price     = forecast_price,
+            lstm_price    = lstm_price,
+            current_hurst = current_hurst,
+            current_price = current_price,
+        )
+
         results[ticker] = {
             "current_price":  current_price,
-            "forecast_price": forecast_price,
+            "xgb_forecast_price": forecast_price,
+            "lstm_forecast_price": lstm_price,
+            "forecast_price": ensemble_price,
             "mape":           round(mape, 2),
             "directional_accuracy":  round(directional_accuracy, 2),
             "forecast_date":  forecast_date,
-            "direction":      "UP" if forecast_price > current_price else "DOWN",
-            "change_pct":     round(((forecast_price - current_price) / current_price) * 100, 2),
+            "direction":      "UP" if ensemble_price > current_price else "DOWN",
+            "change_pct":     round(((ensemble_price - current_price) / current_price) * 100, 2),
             "feature_importance": dict(zip(FEATURES, model.feature_importances_)),
-            "forecast_confidence": confidence
+            "forecast_confidence": confidence,
+            "device": lstm_device
         }
+
+        # Step 5 - write model metadata to database
+        from sqlalchemy import text
+        from datetime import datetime
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO model_metadata (
+                    ticker, xgb_mape, xgb_dir_acc, lstm_val_mape,
+                    lstm_epochs_trained, meta_xgb_coef, meta_lstm_coef,
+                    meta_hurst_coef, ensemble_in_use, last_trained
+                ) VALUES (
+                    :ticker, :xgb_mape, :xgb_dir_acc, :lstm_val_mape,
+                    :lstm_epochs, :meta_xgb, :meta_lstm, :meta_hurst,
+                    :in_use, :trained
+                )
+                ON CONFLICT (ticker) DO UPDATE SET
+                    xgb_mape            = EXCLUDED.xgb_mape,
+                    xgb_dir_acc         = EXCLUDED.xgb_dir_acc,
+                    lstm_val_mape       = EXCLUDED.lstm_val_mape,
+                    lstm_epochs_trained = EXCLUDED.lstm_epochs_trained,
+                    meta_xgb_coef       = EXCLUDED.meta_xgb_coef,
+                    meta_lstm_coef      = EXCLUDED.meta_lstm_coef,
+                    meta_hurst_coef     = EXCLUDED.meta_hurst_coef,
+                    ensemble_in_use     = EXCLUDED.ensemble_in_use,
+                    last_trained        = EXCLUDED.last_trained
+            """), {
+                "ticker":    ticker,
+                "xgb_mape":  mape,
+                "xgb_dir_acc": directional_accuracy,
+                "lstm_val_mape": lstm_result.get("val_mape"),
+                "lstm_epochs":   lstm_result.get("epochs_trained"),
+                "meta_xgb":  float(meta.coef_[0]) if meta is not None else None,
+                "meta_lstm": float(meta.coef_[1]) if meta is not None else None,
+                "meta_hurst":float(meta.coef_[2]) if meta is not None else None,
+                "in_use":    1,
+                "trained":   datetime.utcnow(),
+            })
+            conn.commit()
 
     return results
