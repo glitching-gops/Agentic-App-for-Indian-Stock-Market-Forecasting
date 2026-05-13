@@ -260,7 +260,7 @@ def train_and_forecast(single_ticker=None):
             "xgb_mape":       round(mape, 2),
             "xgb_dir_acc":    round(directional_accuracy, 2),
             "mape":           round(ensemble_mape, 2),
-            "directional_accuracy":  round(ensemble_dir_acc, 2),
+            "dir_acc":  round(ensemble_dir_acc, 2),
             "forecast_date":  forecast_date,
             "direction":      "UP" if ensemble_price > current_price else "DOWN",
             "change_pct":     round(((ensemble_price - current_price) / current_price) * 100, 2),
