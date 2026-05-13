@@ -25,7 +25,6 @@ import optuna
 import pandas as pd
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_percentage_error
-from data.db import get_engine
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -36,7 +35,7 @@ PARAMS_DIR = os.path.join(
 os.makedirs(PARAMS_DIR, exist_ok=True)
 
 N_TRIALS   = 2
-N_FOLDS    = 5
+N_FOLDS    = 1
 
 
 def get_params_path(ticker: str) -> str:

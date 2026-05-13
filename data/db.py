@@ -194,6 +194,8 @@ def init_db():
                 xgb_mape            REAL,
                 xgb_dir_acc         REAL,
                 lstm_val_mape       REAL,
+                ensemble_mape       REAL,
+                ensemble_dir_acc    REAL,
                 lstm_epochs_trained INTEGER,
                 meta_xgb_coef       REAL,
                 meta_lstm_coef      REAL,
@@ -202,6 +204,15 @@ def init_db():
                 last_trained        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """))
+
+        # Add new model_metadata columns (safe migration)
+        meta_new_columns = ["ensemble_mape", "ensemble_dir_acc"]
+        for col in meta_new_columns:
+            try:
+                with conn.begin_nested():
+                    conn.execute(text(f"ALTER TABLE model_metadata ADD COLUMN {col} REAL"))
+            except Exception:
+                pass  # Column already exists, skip
 
         conn.commit()
     print("Database initialised.")

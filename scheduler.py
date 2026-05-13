@@ -3,7 +3,6 @@
 import time
 import logging
 import os
-from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 
@@ -26,7 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-LOCK_FILE = os.path.join(os.path.dirname(__file__), "scheduler.lock")
+# Lock file approach removed — APScheduler job_defaults handle
+# concurrent run prevention natively via coalesce + max_instances.
 
 def run_pipeline_job():
     logger.info("Starting scheduled pipeline run...")
@@ -78,7 +78,6 @@ def weekly_retune_all():
             tune_hyperparameters(ticker, X, y, force=True)
             
             from pipeline.lstm_model import train_lstm
-            from pipeline.meta_learner import train_meta_learner
 
             try:
                 df_full = X.copy()
@@ -97,27 +96,33 @@ def weekly_retune_all():
     logger.info("[Scheduler] Weekly retune complete")
 
 def start_scheduler():
-    # Simple duplicate prevention
-    if os.path.exists(LOCK_FILE):
-        logger.warning("Scheduler lock file exists. Assuming scheduler is already running in another process.")
-        return None
-        
-    with open(LOCK_FILE, "w") as f:
-        f.write(str(os.getpid()))
-        
-    import atexit
-    def remove_lock():
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
-    atexit.register(remove_lock)
+    """Starts the APScheduler background scheduler.
 
-    ist_tz = pytz.timezone('Asia/Kolkata')
-    scheduler = BackgroundScheduler(timezone=ist_tz)
-    
-    # Run at 18:30 IST daily
-    scheduler.add_job(run_pipeline_job, 'cron', hour=18, minute=30, id='pipeline_job', replace_existing=True)
-    
-    # Run weekly full Optuna retune on Sunday at 02:00 IST
+    Uses APScheduler's native coalesce + max_instances to prevent duplicate
+    runs — no lock files needed or created.
+    """
+    ist_tz = pytz.timezone("Asia/Kolkata")
+
+    scheduler = BackgroundScheduler(
+        timezone=ist_tz,
+        job_defaults={
+            "coalesce":           True,   # merge multiple missed runs into one
+            "max_instances":      1,      # never run the same job twice simultaneously
+            "misfire_grace_time": 3600,   # allow up to 1 hour late start
+        }
+    )
+
+    # Daily pipeline at 18:30 IST
+    scheduler.add_job(
+        run_pipeline_job,
+        "cron",
+        hour=18,
+        minute=30,
+        id="pipeline_job",
+        replace_existing=True,
+    )
+
+    # Weekly full Optuna retune — Sunday 02:00 IST
     scheduler.add_job(
         weekly_retune_all,
         trigger="cron",
@@ -125,9 +130,9 @@ def start_scheduler():
         hour=2,
         minute=0,
         id="weekly_retune",
-        replace_existing=True
+        replace_existing=True,
     )
-    
+
     scheduler.start()
     logger.info("Scheduler started. Pipeline will run daily at 18:30 IST.")
     return scheduler

@@ -23,7 +23,6 @@ import os
 import numpy as np
 import joblib
 from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
 
 MODELS_DIR  = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),

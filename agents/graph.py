@@ -9,7 +9,6 @@ from agents.external_data_agent import external_data_node
 from agents.forecasting_agent import forecasting_node
 from agents.critic_agent import critic_node
 from data.tickers import TICKERS
-import pandas as pd
 
 def compute_composite_score(
     upside_pct: float,

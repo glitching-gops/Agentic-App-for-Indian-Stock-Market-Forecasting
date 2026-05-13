@@ -103,44 +103,63 @@ Respond ONLY in this exact JSON format with no other text:
             print(f"[{ticker}] Critic Agent JSON parse error: {e}")
             parsed = {}
             
-        verdict = parsed.get("verdict", "FLAGGED")
-        
-        # Hard override logic from prompt
-        mape = state.get("model_mape", 100.0)
-        change = abs(state.get("forecast_change_pct", 0.0))
-        num_flags = len(parsed.get("flags", []))
-        
-        dir_acc = state.get("model_directional_accuracy", 0.0)
-        if mape > 15.0 or change > 25.0 or num_flags >= 3:
-            verdict = "REJECTED"
-        # APPROVED conditions — more achievable thresholds
-        elif verdict != "REJECTED":
-            if mape < 10.0 and dir_acc > 65.0 and num_flags == 0:
-                verdict = "APPROVED"
-            elif mape < 7.0 and dir_acc > 70.0:
-                # Excellent model quality overrides even one flag
-                verdict = "APPROVED"
-            elif mape < 12.0 and dir_acc > 75.0 and num_flags <= 1:
-                # High directional accuracy with low error earns APPROVED
-                # even with one minor flag
-                verdict = "APPROVED"
-            
-        updates["critic_verdict"] = verdict
-        updates["critic_reasoning"] = parsed.get("reasoning", "Parsed reasoning.")
-        updates["critic_flags"] = parsed.get("flags", [])
+        verdict   = parsed.get("verdict", "FLAGGED")
+        reasoning = parsed.get("reasoning", "")
+        flags     = parsed.get("flags", [])
+
+        # ── Hard verdict override rules ───────────────────────────────────────
+        mape       = state.get("model_mape", 0.0)
+        change_pct = abs(state.get("forecast_change_pct", 0.0))
+        dir_acc    = state.get("model_directional_accuracy", 0.0)
+        num_flags  = len(flags)
+
+        # REJECTED — only for genuinely unreliable forecasts
+        if mape > 15.0:
+            verdict    = "REJECTED"
+            reasoning += f" Auto-rejected: MAPE of {mape:.1f}% exceeds the 15% threshold."
+        elif change_pct > 30.0:
+            verdict    = "REJECTED"
+            reasoning += (
+                f" Auto-rejected: forecast change of {change_pct:.1f}% "
+                f"exceeds the 30% plausibility cap."
+            )
+        elif num_flags >= 3:
+            verdict    = "REJECTED"
+            reasoning += f" Auto-rejected: {num_flags} simultaneous flags raised."
+
+        # APPROVED — model quality overrides LLM flags progressively
+        # Tier 1: exceptional model — overrides any number of flags
+        elif mape < 6.0 and dir_acc > 75.0:
+            verdict = "APPROVED"
+        # Tier 2: strong model — overrides up to 2 flags
+        elif mape < 8.0 and dir_acc > 70.0 and num_flags <= 2:
+            verdict = "APPROVED"
+        # Tier 3: good model — overrides 1 flag
+        elif mape < 10.0 and dir_acc > 65.0 and num_flags <= 1:
+            verdict = "APPROVED"
+        # Tier 4: no flags at all — even average models get approved
+        elif num_flags == 0 and mape < 12.0:
+            verdict = "APPROVED"
+
+        updates["critic_verdict"]               = verdict
+        updates["critic_reasoning"]             = reasoning
+        updates["critic_flags"]                 = flags
         updates["critic_confidence_adjustment"] = parsed.get("confidence_adjustment", "MAINTAINED")
-        
+
+        # PSU oil override — always at least FLAGGED
         PSU_OIL_TICKERS = ["ONGC.NS", "BPCL.NS"]
         if ticker in PSU_OIL_TICKERS:
-            updates["critic_flags"].append(
-                "PSU oil stock: price is heavily driven by crude oil prices and "
-                "government fuel pricing policy, which are not captured in the "
-                "current signal library. Treat this forecast with caution."
-            )
-            # Force verdict to FLAGGED if it was APPROVED
+            if not any("PSU" in f or "crude" in f.lower() for f in updates["critic_flags"]):
+                updates["critic_flags"].append(
+                    "PSU oil stock: price driven by crude oil prices and "
+                    "government fuel pricing policy — risks outside current signal library."
+                )
             if updates["critic_verdict"] == "APPROVED":
-                updates["critic_verdict"] = "FLAGGED"
-                updates["critic_reasoning"] += " Note: PSU oil sector flag applied automatically."
+                updates["critic_verdict"]   = "FLAGGED"
+                updates["critic_reasoning"] += (
+                    " PSU oil sector override applied: crude oil price risk "
+                    "not captured in current signal library."
+                )
         
     except Exception as e:
         print(f"[{ticker}] Critic Agent error: {e}")

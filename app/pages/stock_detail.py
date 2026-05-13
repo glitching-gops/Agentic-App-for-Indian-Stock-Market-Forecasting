@@ -1,7 +1,5 @@
-# app/dashboard.py
+# app/pages/stock_detail.py
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 import sys
 import os
@@ -12,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Allow imports from project root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import requests
 
@@ -52,12 +50,9 @@ def fetch_leaderboard(sector=None, verdict=None, confidence=None, sort_by="compo
     response.raise_for_status()
     return response.json()
 
-# Removed TICKERS import
-from app.style import inject_custom_css
 from app.components.chart import render_price_chart
 from app.components.signals_view import render_signals_view
 from app.components.sentiment_view import render_sentiment_view
-from app.components.critic_view import render_critic_view
 
 # inject_custom_css() # Injected globally in main.py
 
@@ -318,7 +313,7 @@ with tab4:
     
     flags = state.get("critic_flags", [])
     if flags:
-        st.markdown(f"""
+        st.markdown("""
 <div style="position: relative; margin-top: 20px;">
 <div style="position: absolute; left: -30px; top: 0; background-color: #0D1B3E; padding: 4px;">
 <div style="width: 16px; height: 16px; border-radius: 50%; background-color: #EF476F;"></div>

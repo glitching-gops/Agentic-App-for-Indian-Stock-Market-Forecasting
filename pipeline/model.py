@@ -10,7 +10,7 @@ from sklearn.metrics import mean_absolute_percentage_error
 from data.db import get_engine
 from data.tickers import TICKERS
 from pipeline.tuning import tune_hyperparameters, expanding_window_cv
-from pipeline.lstm_model import train_lstm, predict_lstm, LSTM_FEATURES
+from pipeline.lstm_model import train_lstm, predict_lstm
 from pipeline.meta_learner import train_meta_learner, predict_ensemble
 
 FEATURES = [
@@ -208,6 +208,37 @@ def train_and_forecast(single_ticker=None):
         except Exception as e:
             print(f"[Model] {ticker}: meta-learner training failed — {e}")
             meta = None
+            ensemble_mape = mape
+            ensemble_dir_acc = directional_accuracy
+
+        if meta:
+            try:
+                # Calculate ensemble MAPE on validation set
+                # Re-align lengths as in train_meta_learner
+                min_len = min(len(y_pred_test), len(lstm_val_preds), len(hurst_val), len(y_test))
+                X_meta_test = np.column_stack([
+                    y_pred_test[-min_len:],
+                    lstm_val_preds[-min_len:],
+                    hurst_val[-min_len:]
+                ])
+                y_meta_test = y_test.values[-min_len:]
+                
+                ensemble_val_preds = meta.predict(X_meta_test)
+                ensemble_mape = float(mean_absolute_percentage_error(y_meta_test, ensemble_val_preds) * 100)
+                
+                # Calculate ensemble directional accuracy
+                # Need prev_close for y_meta_test
+                test_prev_close_meta = test_prev_close[-min_len:]
+                actual_dir_meta = np.where(y_meta_test > test_prev_close_meta, 1, 0)
+                pred_dir_meta   = np.where(ensemble_val_preds > test_prev_close_meta, 1, 0)
+                ensemble_dir_acc = float(np.mean(actual_dir_meta == pred_dir_meta) * 100)
+            except Exception as e:
+                print(f"[Model] {ticker}: ensemble evaluation failed — {e}")
+                ensemble_mape = mape
+                ensemble_dir_acc = directional_accuracy
+        else:
+            ensemble_mape = mape
+            ensemble_dir_acc = directional_accuracy
 
         # ── Ensemble final forecast ──────────────────────────────────────────────────
         current_hurst  = float(df_full["hurst"].iloc[-1]) \
@@ -226,8 +257,10 @@ def train_and_forecast(single_ticker=None):
             "xgb_forecast_price": forecast_price,
             "lstm_forecast_price": lstm_price,
             "forecast_price": ensemble_price,
-            "mape":           round(mape, 2),
-            "directional_accuracy":  round(directional_accuracy, 2),
+            "xgb_mape":       round(mape, 2),
+            "xgb_dir_acc":    round(directional_accuracy, 2),
+            "mape":           round(ensemble_mape, 2),
+            "directional_accuracy":  round(ensemble_dir_acc, 2),
             "forecast_date":  forecast_date,
             "direction":      "UP" if ensemble_price > current_price else "DOWN",
             "change_pct":     round(((ensemble_price - current_price) / current_price) * 100, 2),
@@ -243,10 +276,12 @@ def train_and_forecast(single_ticker=None):
             conn.execute(text("""
                 INSERT INTO model_metadata (
                     ticker, xgb_mape, xgb_dir_acc, lstm_val_mape,
+                    ensemble_mape, ensemble_dir_acc,
                     lstm_epochs_trained, meta_xgb_coef, meta_lstm_coef,
                     meta_hurst_coef, ensemble_in_use, last_trained
                 ) VALUES (
                     :ticker, :xgb_mape, :xgb_dir_acc, :lstm_val_mape,
+                    :ensemble_mape, :ensemble_dir_acc,
                     :lstm_epochs, :meta_xgb, :meta_lstm, :meta_hurst,
                     :in_use, :trained
                 )
@@ -254,6 +289,8 @@ def train_and_forecast(single_ticker=None):
                     xgb_mape            = EXCLUDED.xgb_mape,
                     xgb_dir_acc         = EXCLUDED.xgb_dir_acc,
                     lstm_val_mape       = EXCLUDED.lstm_val_mape,
+                    ensemble_mape       = EXCLUDED.ensemble_mape,
+                    ensemble_dir_acc    = EXCLUDED.ensemble_dir_acc,
                     lstm_epochs_trained = EXCLUDED.lstm_epochs_trained,
                     meta_xgb_coef       = EXCLUDED.meta_xgb_coef,
                     meta_lstm_coef      = EXCLUDED.meta_lstm_coef,
@@ -265,10 +302,12 @@ def train_and_forecast(single_ticker=None):
                 "xgb_mape":  mape,
                 "xgb_dir_acc": directional_accuracy,
                 "lstm_val_mape": lstm_result.get("val_mape"),
+                "ensemble_mape": ensemble_mape,
+                "ensemble_dir_acc": ensemble_dir_acc,
                 "lstm_epochs":   lstm_result.get("epochs_trained"),
-                "meta_xgb":  float(meta.coef_[0]) if meta is not None else None,
-                "meta_lstm": float(meta.coef_[1]) if meta is not None else None,
-                "meta_hurst":float(meta.coef_[2]) if meta is not None else None,
+                "meta_xgb":  float(meta.coef_[0]) if meta is not None else 0.5,
+                "meta_lstm": float(meta.coef_[1]) if meta is not None else 0.5,
+                "meta_hurst":float(meta.coef_[2]) if meta is not None else 0.0,
                 "in_use":    1,
                 "trained":   datetime.utcnow(),
             })

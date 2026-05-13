@@ -1,0 +1,13 @@
+{
+  "n_estimators": 612,
+  "learning_rate": 0.03877534340838898,
+  "max_depth": 5,
+  "subsample": 0.9629407839709687,
+  "colsample_bytree": 0.6534846141733843,
+  "min_child_weight": 8,
+  "gamma": 4.79223633606645,
+  "reg_alpha": 0.578670489759151,
+  "reg_lambda": 0.48484115961338614,
+  "tree_method": "hist",
+  "device": "cuda"
+}

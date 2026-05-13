@@ -9,7 +9,6 @@ and sector breakdown chart.
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 import os
 from datetime import datetime
