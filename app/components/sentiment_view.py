@@ -49,16 +49,15 @@ def render_sentiment_view(ticker: str, sentiment_score: float) -> None:
         # Replace DB call with API fetch gracefully
         api_url = os.getenv("API_BASE_URL", "http://localhost:8000")
         try:
-            r = requests.get(f"{api_url}/api/sentiment/{ticker}/headlines", timeout=5)
+            r = requests.get(f"{api_url}/api/sentiment/{ticker}/headlines", timeout=60)
             if r.status_code == 200:
                 headlines_df = pd.DataFrame(r.json())
             else:
                 headlines_df = pd.DataFrame()
-        except requests.exceptions.ConnectionError:
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             st.warning(
-                "⚠️ Unable to reach the forecast API. "
-                "The backend service may be starting up — "
-                "please wait 30 seconds and refresh the page."
+                "⚠️ Backend is taking too long to respond (likely cold start). "
+                "Please wait 60 seconds and refresh."
             )
             headlines_df = pd.DataFrame()
         except Exception:

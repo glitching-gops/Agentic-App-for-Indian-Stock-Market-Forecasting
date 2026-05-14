@@ -39,20 +39,20 @@ def fetch_leaderboard(
         r = requests.get(
             f"{API_BASE_URL}/api/leaderboard",
             params=params,
-            timeout=10
+            timeout=30
         )
         r.raise_for_status()
         return r.json()
-    except requests.exceptions.ConnectionError:
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         st.warning(
             "⚠️ Unable to reach the forecast API. "
-            "The backend service may be starting up — "
-            "please wait 30 seconds and refresh the page."
+            "The backend service may be starting up (Render cold start) — "
+            "please wait 30-60 seconds and refresh the page."
         )
-        return []
+        return {"entries": [], "last_updated": "N/A", "total": 0}
     except Exception as e:
         st.error(f"⚠️ Error fetching leaderboard: {e}")
-        return []
+        return {"entries": [], "last_updated": "N/A", "total": 0}
 
 
 

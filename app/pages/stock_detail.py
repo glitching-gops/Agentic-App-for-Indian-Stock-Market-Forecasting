@@ -26,29 +26,38 @@ else:
 
 def fetch_forecast(ticker: str) -> dict:
     """Fetches the latest forecast for a ticker from the FastAPI backend."""
-    response = requests.get(f"{API_BASE_URL}/api/forecasts/{ticker}")
-    if response.status_code == 404:
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/forecasts/{ticker}", timeout=60)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+    except:
         return None
-    response.raise_for_status()
-    return response.json()
 
 def fetch_signals(ticker: str) -> dict:
     """Fetches historical signals from the FastAPI backend."""
-    response = requests.get(f"{API_BASE_URL}/api/signals/{ticker}")
-    if response.status_code == 404:
+    try:
+        response = requests.get(f"{API_BASE_URL}/api/signals/{ticker}", timeout=60)
+        if response.status_code == 404:
+            return {"signals_df": [], "latest_signals": {}}
+        response.raise_for_status()
+        return response.json()
+    except:
         return {"signals_df": [], "latest_signals": {}}
-    response.raise_for_status()
-    return response.json()
 
 def fetch_leaderboard(sector=None, verdict=None, confidence=None, sort_by="composite_score") -> dict:
     """Fetches the leaderboard from the FastAPI backend with optional filters."""
-    params = {"sort_by": sort_by, "limit": 100}
-    if sector:     params["sector"]     = sector
-    if verdict:    params["verdict"]    = verdict
-    if confidence: params["confidence"] = confidence
-    response = requests.get(f"{API_BASE_URL}/api/leaderboard", params=params)
-    response.raise_for_status()
-    return response.json()
+    try:
+        params = {"sort_by": sort_by, "limit": 100}
+        if sector:     params["sector"]     = sector
+        if verdict:    params["verdict"]    = verdict
+        if confidence: params["confidence"] = confidence
+        response = requests.get(f"{API_BASE_URL}/api/leaderboard", params=params, timeout=60)
+        response.raise_for_status()
+        return response.json()
+    except:
+        return {"entries": [], "last_updated": "N/A", "total": 0}
 
 from app.components.chart import render_price_chart
 from app.components.signals_view import render_signals_view
@@ -69,15 +78,14 @@ def fetch_stocks() -> list[dict]:
     try:
         response = requests.get(
             f"{API_BASE_URL}/api/stocks",
-            timeout=10
+            timeout=60
         )
         response.raise_for_status()
         return response.json().get("stocks", [])
-    except requests.exceptions.ConnectionError:
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         st.warning(
-            "⚠️ Unable to reach the forecast API. "
-            "The backend service may be starting up — "
-            "please wait 30 seconds and refresh the page."
+            "⚠️ Backend is taking too long to respond (likely cold start). "
+            "Please wait 60 seconds and refresh."
         )
         return []
     except Exception as e:

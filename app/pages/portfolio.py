@@ -27,15 +27,15 @@ def fetch_top_stocks(limit: int = 20) -> list[dict]:
                 "limit":   limit,
                 "verdict": "APPROVED_OR_FLAGGED",
             },
-            timeout=10,
+            timeout=30,
         )
         r.raise_for_status()
         return r.json().get("entries", [])
-    except requests.exceptions.ConnectionError:
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         st.warning(
             "⚠️ Unable to reach the forecast API. "
-            "The backend service may be starting up — "
-            "please wait 30 seconds and refresh the page."
+            "The backend service may be starting up (Render cold start) — "
+            "please wait 30-60 seconds and refresh the page."
         )
         return []
     except Exception as e:
