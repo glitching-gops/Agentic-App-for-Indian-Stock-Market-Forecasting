@@ -39,6 +39,10 @@ app.include_router(admin.router,      prefix="/api/admin",      tags=["Admin"])
 app.include_router(signals.router,    prefix="/api/signals",    tags=["Signals"])
 app.include_router(sentiment.router,  prefix="/api/sentiment",  tags=["Sentiment"])
 
+@app.get("/")
+def read_root():
+    return {"message": "ZeRO Stock Forecast API is running", "docs": "/docs", "health": "/api/health"}
+
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "version": "1.0.0"}
