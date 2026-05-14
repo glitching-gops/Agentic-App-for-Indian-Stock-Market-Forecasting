@@ -75,9 +75,9 @@ def fetch_stocks() -> list[dict]:
         return response.json().get("stocks", [])
     except requests.exceptions.ConnectionError:
         st.warning(
-            "⚠️ Backend API is not reachable. "
-            "Stock list unavailable. Start the FastAPI server with: "
-            "`uvicorn api.main:app --reload --port 8000`"
+            "⚠️ Unable to reach the forecast API. "
+            "The backend service may be starting up — "
+            "please wait 30 seconds and refresh the page."
         )
         return []
     except Exception as e:

@@ -54,6 +54,13 @@ def render_sentiment_view(ticker: str, sentiment_score: float) -> None:
                 headlines_df = pd.DataFrame(r.json())
             else:
                 headlines_df = pd.DataFrame()
+        except requests.exceptions.ConnectionError:
+            st.warning(
+                "⚠️ Unable to reach the forecast API. "
+                "The backend service may be starting up — "
+                "please wait 30 seconds and refresh the page."
+            )
+            headlines_df = pd.DataFrame()
         except Exception:
             headlines_df = pd.DataFrame()
         

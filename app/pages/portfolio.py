@@ -31,6 +31,13 @@ def fetch_top_stocks(limit: int = 20) -> list[dict]:
         )
         r.raise_for_status()
         return r.json().get("entries", [])
+    except requests.exceptions.ConnectionError:
+        st.warning(
+            "⚠️ Unable to reach the forecast API. "
+            "The backend service may be starting up — "
+            "please wait 30 seconds and refresh the page."
+        )
+        return []
     except Exception as e:
         st.error(f"⚠️ Error fetching portfolio data: {e}")
         return []

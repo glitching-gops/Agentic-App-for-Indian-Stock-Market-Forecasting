@@ -45,13 +45,14 @@ def fetch_leaderboard(
         return r.json()
     except requests.exceptions.ConnectionError:
         st.warning(
-            "⚠️ Backend API is not reachable. "
-            "Start it with: `uvicorn api.main:app --reload --port 8000`"
+            "⚠️ Unable to reach the forecast API. "
+            "The backend service may be starting up — "
+            "please wait 30 seconds and refresh the page."
         )
-        return None
+        return []
     except Exception as e:
         st.error(f"⚠️ Error fetching leaderboard: {e}")
-        return None
+        return []
 
 
 
