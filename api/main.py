@@ -12,9 +12,11 @@ from scheduler import start_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Run on startup
-    init_db()
-    start_scheduler()
+    # Run on startup (DB init is handled by render_start.sh)
+    try:
+        start_scheduler()
+    except Exception as e:
+        print(f"Warning: Scheduler failed to start: {e}")
     yield
     # Run on shutdown (if needed)
 
