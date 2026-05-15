@@ -10,19 +10,25 @@ from transformers import pipeline
 from data.db import get_engine
 from data.tickers import TICKERS
 
-# Load FinBERT model globally so it's cached across calls
-print("Loading FinBERT model...")
-try:
-    finbert = pipeline("text-classification", model="ProsusAI/finbert")
-except Exception as e:
-    print(f"Error loading FinBERT: {e}")
-    finbert = None
+# FinBERT model lazy loading
+finbert = None
+
+def get_finbert():
+    global finbert
+    if finbert is None:
+        print("Lazy loading FinBERT model...")
+        try:
+            finbert = pipeline("text-classification", model="ProsusAI/finbert")
+        except Exception as e:
+            print(f"Error loading FinBERT: {e}")
+    return finbert
 
 def fetch_and_score(single_ticker=None):
     engine = get_engine()
     tickers_to_process = [single_ticker] if single_ticker else list(TICKERS.keys())
     
-    if finbert is None:
+    model = get_finbert()
+    if model is None:
         print("FinBERT model not loaded. Skipping sentiment analysis.")
         return 0
         
@@ -52,7 +58,7 @@ def fetch_and_score(single_ticker=None):
             else:
                 headlines = [entry.title for entry in entries]
                 # Run FinBERT
-                results = finbert(headlines)
+                results = model(headlines)
                 
                 rows_to_insert = []
                 for headline, result in zip(headlines, results):
