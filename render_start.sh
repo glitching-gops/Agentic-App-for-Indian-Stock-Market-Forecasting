@@ -17,8 +17,8 @@ if [ ! -f "models/joblib/RELIANCE.NS.joblib" ]; then
         exit 1
     fi
 
-    # Download zip
-    curl -L \
+    # Download zip (forcing HTTP/1.1 to avoid protocol errors)
+    curl -L --http1.1 \
         -H "Authorization: token ${GITHUB_TOKEN}" \
         -H "Accept: application/vnd.github.v3.raw" \
         "https://api.github.com/repos/glitching-gops/Agentic-Stock-Forecast/contents/models_store.zip?ref=model-store" \
