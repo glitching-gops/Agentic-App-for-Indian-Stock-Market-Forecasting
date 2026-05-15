@@ -4,12 +4,12 @@ Protected by API key header.
 """
 from fastapi import APIRouter, Depends, BackgroundTasks
 from api.dependencies import verify_api_key
-from agents.graph import run_graph
 
 router = APIRouter()
 
 def _run_pipeline(ticker: str):
     try:
+        from agents.graph import run_graph
         run_graph(ticker)
     except Exception as e:
         print(f"[Admin] Pipeline failed for {ticker}: {e}")

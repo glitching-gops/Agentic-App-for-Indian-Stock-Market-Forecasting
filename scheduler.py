@@ -6,12 +6,8 @@ import os
 from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 
-from pipeline.fetch import fetch_and_store
-from pipeline.signals import compute_and_store
-from pipeline.sentiment import fetch_and_score
-from pipeline.macro import fetch_and_store as fetch_macro
-from pipeline.model import train_and_forecast, load_features_for_ticker
-from pipeline.tuning import tune_hyperparameters
+# Imports deferred to job execution to save memory
+
 
 # Setup logging to file
 os.makedirs(os.path.join(os.path.dirname(__file__), "logs"), exist_ok=True)
@@ -31,6 +27,12 @@ logger = logging.getLogger(__name__)
 def run_pipeline_job():
     logger.info("Starting scheduled pipeline run...")
     try:
+        from pipeline.fetch import fetch_and_store
+        from pipeline.signals import compute_and_store
+        from pipeline.sentiment import fetch_and_score
+        from pipeline.macro import fetch_and_store as fetch_macro
+        from pipeline.model import train_and_forecast
+
         # Step 1: Fetch OHLCV
         logger.info("[1/5] Fetching OHLCV data...")
         fetch_and_store()
@@ -64,6 +66,8 @@ def weekly_retune_all():
     from data.tickers import TICKERS
     from data.db import get_engine
     import pandas as pd
+    from pipeline.model import load_features_for_ticker
+    from pipeline.tuning import tune_hyperparameters
 
     engine = get_engine()
     logger.info(f"[Scheduler] Weekly retune started for {len(TICKERS)} stocks")

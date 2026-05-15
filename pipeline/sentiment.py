@@ -6,7 +6,7 @@ import pandas as pd
 import feedparser
 from datetime import datetime
 import urllib.parse
-from transformers import pipeline
+
 from data.db import get_engine
 from data.tickers import TICKERS
 
@@ -18,6 +18,7 @@ def get_finbert():
     if finbert is None:
         print("Lazy loading FinBERT model...")
         try:
+            from transformers import pipeline
             finbert = pipeline("text-classification", model="ProsusAI/finbert")
         except Exception as e:
             print(f"Error loading FinBERT: {e}")
