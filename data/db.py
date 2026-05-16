@@ -14,12 +14,17 @@ _SQLITE_PATH = f"sqlite:///{os.path.join(_PROJECT_ROOT, 'stock_forecast.db')}"
 DATABASE_URL = os.getenv("DATABASE_URL", _SQLITE_PATH)
 
 # SQLAlchemy requires postgresql:// not postgres:// for newer versions
+# Normalize postgres:// → postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Use psycopg v3 driver (psycopg[binary] is installed; psycopg2-binary DLL is blocked by policy)
+# Force psycopg2 driver — psycopg (v3) is not installed on Render
+# Converts: postgresql://... → postgresql+psycopg2://...
+# Converts: postgresql+psycopg://... → postgresql+psycopg2://...
 if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+elif DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
 
 _ENGINE = None
 

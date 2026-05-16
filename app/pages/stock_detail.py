@@ -13,8 +13,20 @@ load_dotenv(override=True)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 import requests
+import streamlit as st
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+def _get_api_base_url() -> str:
+    """
+    Reads API_BASE_URL from Streamlit secrets (Streamlit Cloud)
+    with fallback to environment variable (local development)
+    and finally to localhost for offline testing.
+    """
+    try:
+        return st.secrets["API_BASE_URL"]
+    except (KeyError, FileNotFoundError):
+        return os.getenv("API_BASE_URL", "http://localhost:8000")
+
+API_BASE_URL = _get_api_base_url()
 
 # Check if a ticker was pre-selected from the leaderboard navigation
 if "selected_ticker" in st.session_state:

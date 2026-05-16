@@ -13,7 +13,18 @@ import requests
 import os
 from datetime import datetime
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+def _get_api_base_url() -> str:
+    """
+    Reads API_BASE_URL from Streamlit secrets (Streamlit Cloud)
+    with fallback to environment variable (local development)
+    and finally to localhost for offline testing.
+    """
+    try:
+        return st.secrets["API_BASE_URL"]
+    except (KeyError, FileNotFoundError):
+        return os.getenv("API_BASE_URL", "http://localhost:8000")
+
+API_BASE_URL = _get_api_base_url()
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
