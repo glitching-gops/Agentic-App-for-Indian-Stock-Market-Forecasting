@@ -1,71 +1,214 @@
 """
 app/pages/about.py
 
-About page describing the system architecture and methodology.
+About page — product description, architecture overview,
+signal library, and model performance summary.
 """
 
 import streamlit as st
 
 
 def main():
-    st.markdown("## ℹ️ About ZeRO Stock Forecast")
-    st.divider()
 
-    st.markdown("""
-    **ZeRO Agentic Stock Forecast** is a multi-agent AI system for
-    30-day price target prediction on the National Stock Exchange of India.
-    Built as a B.Tech final project at Rajiv Gandhi Institute of Petroleum
-    Technology under the guidance of Dr. Roopa Manjunatha.
-    """)
-
-    st.markdown("### System Architecture")
-    st.markdown("""
-    The system uses four specialised agents orchestrated by **LangGraph**:
-
-    1. **Trading Data Agent** — fetches OHLCV data and computes 20 technical
-       signals including RSI, MACD, Bollinger Bands, ATR, OBV, and Hurst
-       exponent for regime detection.
-
-    2. **External Data Agent** — fetches news headlines and scores them
-       using **ProsusAI/FinBERT**, a finance-domain sentiment classifier.
-       Also fetches macro indicators: USD/INR, India VIX, Nifty momentum,
-       sector relative strength, and earnings surprise.
-
-    3. **Forecasting Agent** — trains an **XGBoost + LSTM ensemble** with a
-       Ridge regression meta-learner. The meta-learner uses the Hurst exponent
-       to dynamically weight the two models based on market regime. Also
-       generates a plain-English signal narrative via the **Groq API**.
-
-    4. **Critic Agent** — reviews each forecast using an LLM and assigns a
-       structured verdict of APPROVED, FLAGGED, or REJECTED based on signal
-       consistency, model reliability, and forecast plausibility.
-    """)
-
-    st.markdown("### Performance")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Stocks Covered", "100")
-    col2.metric("Mean MAPE", "4.34%")
-    col3.metric("Mean Dir Accuracy", "85.13%")
-    col4.metric("Forecast Horizon", "30 days")
-
-    st.markdown("### Tech Stack")
-    st.markdown("""
-    | Layer | Technology |
-    |---|---|
-    | Agents & LLMs | LangGraph, LangChain, Groq (openai/gpt-oss-20b) |
-    | Sentiment | ProsusAI/FinBERT |
-    | ML Models | XGBoost (Optuna-tuned), PyTorch LSTM, Ridge meta-learner |
-    | Backend | FastAPI + Uvicorn |
-    | Frontend | Streamlit + Plotly |
-    | Database | Supabase PostgreSQL |
-    | Data | yfinance, feedparser (Google News RSS) |
-    | Scheduler | APScheduler (daily 18:30 IST, weekly retune Sunday 02:00 IST) |
-    """)
+    st.markdown("## About ZeRO Agentic Stock Forecast")
+    st.markdown(
+        "ZeRO is an end-to-end agentic AI system that forecasts "
+        "30-day price targets for 53 diversified Nifty stocks. "
+        "It combines a four-agent LangGraph pipeline, an XGBoost + "
+        "LSTM ensemble model, and an LLM-powered Critic Agent that "
+        "reviews every forecast before it reaches the dashboard."
+    )
 
     st.divider()
+
+    # ── Performance ──────────────────────────────────────────────────────────
+    st.markdown("### Model Performance")
     st.caption(
-        "Built by Venu Gopal Battula · Roll No. 22CS2014 · "
-        "Rajiv Gandhi Institute of Petroleum Technology · 2025-26"
+        "Evaluated using 5-fold expanding window cross-validation — "
+        "a methodology that prevents data leakage by never training "
+        "on future data."
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Mean MAPE",              "~4.3%")
+    c2.metric("Directional Accuracy",   "~85%")
+    c3.metric("Forecast Horizon",       "30 days")
+    c4.metric("Stocks Covered",         "53")
+
+    st.divider()
+
+    # ── How it works ─────────────────────────────────────────────────────────
+    st.markdown("### How It Works")
+
+    st.markdown("""
+    ZeRO runs a four-agent pipeline orchestrated by **LangGraph**
+    every day after NSE market close. Each agent has a distinct role
+    and passes its outputs to the next through a shared state object.
+    """)
+
+    with st.expander("① Trading Data Agent", expanded=False):
+        st.markdown("""
+        Fetches 2 years of daily OHLCV data from NSE via yfinance and
+        computes 20 technical signals:
+
+        - **Momentum:** RSI-14, Stochastic %K, Williams %R, ROC-10,
+          Lag-1 and Lag-5 returns
+        - **Trend:** SMA-20, EMA-9/21/50, SMA-50 deviation,
+          52-week high/low proximity
+        - **Volatility:** Bollinger Band width/upper/lower, ATR-14
+        - **Volume:** OBV, Volume ROC
+        - **Regime:** Hurst exponent (detects trending vs
+          mean-reverting market conditions)
+        """)
+
+    with st.expander("② External Data Agent", expanded=False):
+        st.markdown("""
+        Gathers external signals from two sources:
+
+        **News Sentiment** — fetches the 5 most recent headlines per
+        stock from Google News RSS and scores each using
+        ProsusAI/FinBERT, a BERT model pre-trained on financial text.
+        Produces a daily aggregate sentiment score in the range −1 to +1.
+
+        **Macro & Sector Signals** — fetches USD/INR exchange rate,
+        India VIX, Nifty 50 momentum (5d and 20d), sector relative
+        momentum over 5, 10, and 20-day windows, and quarterly EPS
+        earnings surprise forward-filled between reporting dates.
+        """)
+
+    with st.expander("③ Forecasting Agent", expanded=False):
+        st.markdown("""
+        Trains and runs a three-model ensemble:
+
+        **XGBoost** — gradient-boosted tree trained on all 30 signals.
+        Hyperparameters tuned using Optuna (50 trials per stock) with
+        5-fold expanding window cross-validation. Retunes weekly.
+
+        **LSTM** — single-layer PyTorch recurrent network with 128
+        hidden units and 0.2 dropout, trained on 30-day input sequences
+        of 10 price and momentum features. GPU-accelerated training with
+        early stopping at patience 10.
+
+        **Ridge Meta-Learner** — combines XGBoost and LSTM predictions
+        using a Ridge regression model trained on validation-set
+        out-of-fold predictions. Uses the Hurst exponent as a third
+        input so the ensemble weights LSTM more heavily in trending
+        regimes and XGBoost in mean-reverting ones.
+
+        After generating the forecast, the agent calls the Groq API
+        to produce a 3-sentence plain-English signal narrative.
+        """)
+
+    with st.expander("④ Critic Agent", expanded=False):
+        st.markdown("""
+        Reviews the forecast using a Groq LLM prompt structured as a
+        senior quantitative analyst checklist. Checks for:
+
+        - Signal conflicts (e.g. RSI overbought + bullish MACD)
+        - Sentiment-price divergence
+        - Extreme forecast magnitude (>30% in 30 days)
+        - Thin trading volume signals
+
+        Returns a structured verdict:
+
+        - ✅ **APPROVED** — strong model quality, signals consistent
+        - ⚠️ **FLAGGED** — one or more concerns, use with caution
+        - ❌ **REJECTED** — MAPE >15%, implausible forecast, or 3+ flags
+
+        All Critic output is advisory. It is generated by an LLM and
+        should not be treated as financial advice.
+        """)
+
+    st.divider()
+
+    # ── Composite score ───────────────────────────────────────────────────────
+    st.markdown("### Leaderboard Composite Score")
+    st.markdown(
+        "Each stock is ranked by a weighted composite score out of 100:"
+    )
+
+    score_df_data = {
+        "Component":   [
+            "Directional Accuracy",
+            "Critic Verdict",
+            "Forecast Upside",
+            "Model Confidence"
+        ],
+        "Max Points":  [30, 30, 25, 15],
+        "Description": [
+            "% of correct up/down predictions on held-out test data",
+            "APPROVED = 30 pts, FLAGGED = 12 pts, REJECTED = 0 pts",
+            "Predicted % price gain, capped at 25 points",
+            "High = 15 pts, Medium = 7 pts, Low = 0 pts"
+        ]
+    }
+
+    import pandas as pd
+    st.dataframe(
+        pd.DataFrame(score_df_data),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Max Points": st.column_config.ProgressColumn(
+                min_value=0, max_value=30, format="%d"
+            )
+        }
+    )
+
+    st.divider()
+
+    # ── Tech stack ────────────────────────────────────────────────────────────
+    st.markdown("### Tech Stack")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        **AI & ML**
+        - LangGraph + LangChain (agent orchestration)
+        - Groq API — `openai/gpt-oss-20b` (LLM)
+        - ProsusAI/FinBERT (sentiment)
+        - XGBoost + Optuna (tabular forecasting)
+        - PyTorch LSTM (sequence modelling)
+        - scikit-learn Ridge (ensemble)
+
+        **Data**
+        - yfinance (OHLCV + macro)
+        - feedparser (Google News RSS)
+        - `ta` library (technical indicators)
+        """)
+
+    with col2:
+        st.markdown("""
+        **Infrastructure**
+        - FastAPI + Uvicorn (backend API)
+        - Streamlit + Plotly (dashboard)
+        - Supabase PostgreSQL (database)
+        - Render (backend hosting)
+        - Streamlit Community Cloud (frontend)
+        - APScheduler (daily pipeline)
+        - UptimeRobot (uptime monitoring)
+
+        **Repository**
+        - [github.com/glitching-gops/Agentic-Stock-Forecast](https://github.com/glitching-gops/Agentic-Stock-Forecast)
+        """)
+
+    st.divider()
+
+    # ── Disclaimer ────────────────────────────────────────────────────────────
+    st.caption(
+        "⚠️ ZeRO is a research and portfolio project. "
+        "Forecasts are generated by machine learning models and LLM agents "
+        "and are not financial advice. Past model accuracy does not "
+        "guarantee future performance. Always do your own research before "
+        "making investment decisions."
+    )
+
+    # ── Author ────────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown(
+        "Built by **Venu Gopal Battula** · "
+        "[github.com/glitching-gops](https://github.com/glitching-gops)"
     )
 
 
