@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from groq import Groq
 from agents.state import AgentState
-from pipeline.model import train_and_forecast, FEATURES
+from pipeline.model import train_and_forecast, FEATURES, classify_confidence
 
 def forecasting_node(state: AgentState) -> dict:
     # Initialize Groq client
@@ -23,7 +23,7 @@ def forecasting_node(state: AgentState) -> dict:
     ticker = state["ticker"]
     updates = {}
     
-    model_path = os.path.join(os.path.dirname(__file__), "..", "models", f"{ticker}.joblib")
+    model_path = os.path.join(os.path.dirname(__file__), "..", "models", "joblib", f"{ticker}.joblib")
     
     # Check if model exists and was created today
     needs_training = True
@@ -52,13 +52,7 @@ def forecasting_node(state: AgentState) -> dict:
         updates["model_directional_accuracy"] = res["dir_acc"]
         updates["feature_importances"] = res["feature_importance"]
         
-        # Determine confidence
-        if res["mape"] < 5.0 and res["dir_acc"] > 70.0:
-            updates["forecast_confidence"] = "High"
-        elif res["mape"] <= 10.0 or res["dir_acc"] >= 60.0:
-            updates["forecast_confidence"] = "Medium"
-        else:
-            updates["forecast_confidence"] = "Low"
+        updates["forecast_confidence"] = classify_confidence(res["mape"], res["dir_acc"])
     else:
         # Fallback values
         updates["forecast_price"] = state["current_price"]

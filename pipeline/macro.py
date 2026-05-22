@@ -86,15 +86,7 @@ def fetch_and_store():
         data = yf.download(tickers, period="2y", interval="1d", auto_adjust=True)
         
         if data.empty:
-            print("No macro data found. Attempting DB fallback...")
-            last_row = pd.read_sql("SELECT * FROM macro ORDER BY date DESC LIMIT 1", con=engine)
-            if not last_row.empty:
-                from datetime import datetime
-                today_str = datetime.today().strftime('%Y-%m-%d')
-                if last_row.iloc[0]["date"] != today_str:
-                    last_row["date"] = today_str
-                    last_row.to_sql("macro", con=engine, if_exists="append", index=False)
-                    return 1
+            print("[Macro] No macro data returned from yfinance. Skipping update.")
             return 0
             
         # Extract the Close prices

@@ -23,6 +23,7 @@ import json
 import numpy as np
 import optuna
 import pandas as pd
+import torch
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_percentage_error
 
@@ -34,8 +35,9 @@ PARAMS_DIR = os.path.join(
 )
 os.makedirs(PARAMS_DIR, exist_ok=True)
 
-N_TRIALS   = 2
-N_FOLDS    = 1
+_DEVICE  = "cuda" if torch.cuda.is_available() else "cpu"
+N_TRIALS = 50
+N_FOLDS  = 5
 
 
 def get_params_path(ticker: str) -> str:
@@ -157,7 +159,7 @@ def tune_hyperparameters(
             "reg_alpha":        trial.suggest_float("reg_alpha", 0.0, 2.0),
             "reg_lambda":       trial.suggest_float("reg_lambda", 0.0, 2.0),
             "tree_method":      "hist",
-            "device":           "cuda",
+            "device":           _DEVICE,
         }
         return expanding_window_cv(X, y, params)
 
@@ -166,7 +168,7 @@ def tune_hyperparameters(
 
     best_params = study.best_params
     best_params["tree_method"] = "hist"
-    best_params["device"]      = "cuda"
+    best_params["device"]      = _DEVICE
 
     save_params(ticker, best_params)
     print(f"[Tuning] {ticker}: Best MAPE {study.best_value:.4f} | Params saved")

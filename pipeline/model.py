@@ -5,6 +5,8 @@ import os
 import pandas as pd
 import numpy as np
 import joblib
+from datetime import datetime
+from sqlalchemy import text
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_percentage_error
 from data.db import get_engine
@@ -29,6 +31,13 @@ FEATURES = [
     "earnings_surprise",
 ]
 TARGET   = "target"
+
+def classify_confidence(mape: float, dir_acc: float) -> str:
+    if mape < 8.0 and dir_acc > 65.0:
+        return "High"
+    if mape <= 12.0 or dir_acc >= 55.0:
+        return "Medium"
+    return "Low"
 
 def load_features_for_ticker(ticker: str, engine):
     """
@@ -270,8 +279,6 @@ def train_and_forecast(single_ticker=None):
         }
 
         # Step 5 - write model metadata to database
-        from sqlalchemy import text
-        from datetime import datetime
         with engine.connect() as conn:
             conn.execute(text("""
                 INSERT INTO model_metadata (

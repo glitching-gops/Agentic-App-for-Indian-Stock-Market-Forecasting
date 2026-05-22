@@ -9,11 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Allow imports from project root
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 import requests
-import streamlit as st
 
 def _get_api_base_url() -> str:
     """
@@ -44,7 +40,7 @@ def fetch_forecast(ticker: str) -> dict:
             return None
         response.raise_for_status()
         return response.json()
-    except:
+    except Exception:
         return None
 
 def fetch_signals(ticker: str) -> dict:
@@ -55,7 +51,7 @@ def fetch_signals(ticker: str) -> dict:
             return {"signals_df": [], "latest_signals": {}}
         response.raise_for_status()
         return response.json()
-    except:
+    except Exception:
         return {"signals_df": [], "latest_signals": {}}
 
 def fetch_leaderboard(sector=None, verdict=None, confidence=None, sort_by="composite_score") -> dict:

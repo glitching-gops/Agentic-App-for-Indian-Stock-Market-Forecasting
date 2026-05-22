@@ -147,12 +147,8 @@ def render_filters() -> tuple:
     c1, c2, c3, c4, c5 = st.columns([2, 1.5, 1.5, 1.5, 1])
 
     with c1:
-        sectors = [
-            "All", "Banking & Finance", "Information Technology",
-            "Energy", "FMCG", "Automobile", "Pharmaceuticals",
-            "Metals & Mining", "Infrastructure", "Telecom",
-            "Real Estate", "Consumer Discretionary"
-        ]
+        from data.tickers import get_all_sectors
+        sectors = ["All"] + get_all_sectors()
         sector = st.selectbox("Sector", sectors, index=0)
 
     with c2:

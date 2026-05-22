@@ -227,8 +227,9 @@ def compute_and_store(single_ticker=None):
         # ── 2. MACD Histogram ───────────────────────────────────────────────────
         df["macd_hist"] = MACD(close=df["close"]).macd_diff()
 
-        # ── 3. Bollinger Band Width ─────────────────────────────────────────────
-        df["bb_width"] = BollingerBands(close=df["close"], window=20, window_dev=2).bollinger_wband()
+        # ── 3. Bollinger Band Width, Upper & Lower ──────────────────────────────
+        _bb = BollingerBands(close=df["close"], window=20, window_dev=2)
+        df["bb_width"] = _bb.bollinger_wband()
 
         # ── 4. On-Balance Volume ────────────────────────────────────────────────
         df["obv"] = OnBalanceVolumeIndicator(close=df["close"], volume=df["volume"]).on_balance_volume()
@@ -240,8 +241,8 @@ def compute_and_store(single_ticker=None):
         df["ema_50"] = EMAIndicator(close=df["close"], window=50).ema_indicator()
         
         # ── 5b. Bollinger Upper & Lower ─────────────────────────────────────────
-        df["bb_upper"] = BollingerBands(close=df["close"], window=20, window_dev=2).bollinger_hband()
-        df["bb_lower"] = BollingerBands(close=df["close"], window=20, window_dev=2).bollinger_lband()
+        df["bb_upper"] = _bb.bollinger_hband()
+        df["bb_lower"] = _bb.bollinger_lband()
         
         # ── 6. 9-day EMA ────────────────────────────────────────────────────────
         df["ema_9"] = EMAIndicator(close=df["close"], window=9).ema_indicator()
@@ -301,10 +302,7 @@ def compute_and_store(single_ticker=None):
         df = df.sort_values("date", ascending=True).reset_index(drop=True)
         df["target"] = df["close"].shift(-30)
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        df.dropna(subset=["target"], inplace=True)
-        # We don't drop rows with NaN target here because we want to predict for today!
-        # The model training step will filter out NaN targets.
-        feature_cols = ["rsi", "macd_hist", "bb_width", "obv", "sma_20", "ema_50", "bb_upper", "bb_lower", "ema_9", "ema_21", 
+        feature_cols = ["rsi", "macd_hist", "bb_width", "obv", "sma_20", "ema_50", "bb_upper", "bb_lower", "ema_9", "ema_21",
                        "atr_14", "stoch_k", "williams_r", "roc_10", "vroc_10", "prox_52w", 
                        "lag1_ret", "lag5_ret", "dev_sma50", "hurst", "sector_rel_5d", "sector_rel_10d", "sector_rel_20d", "earnings_surprise"]
                        

@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     # Step 4: Launch Streamlit dashboard
     print("[4/4] Launching dashboard...\n")
-    dashboard_path = os.path.join(os.path.dirname(__file__), "app", "dashboard.py")
+    dashboard_path = os.path.join(os.path.dirname(__file__), "app", "main.py")
     
     # Run streamlit
     try:

@@ -52,10 +52,6 @@ MODELS_DIR  = os.path.join(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
     "models", "lstm"
 )
-SCALER_DIR  = os.path.join(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
-    "models", "lstm"
-)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
