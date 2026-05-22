@@ -11,6 +11,8 @@ load_dotenv(override=True)
 
 import requests
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 def _get_api_base_url() -> str:
     """
     Reads API_BASE_URL from Streamlit secrets (Streamlit Cloud)

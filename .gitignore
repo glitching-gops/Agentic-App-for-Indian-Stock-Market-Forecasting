@@ -1,3 +1,7 @@
+# Local documentation — keep locally, do not push
+CLAUDE.md
+PLAN.md
+
 # Environment & secrets — NEVER commit these
 .env
 .env.*
