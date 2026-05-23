@@ -35,20 +35,30 @@ def _mlflow_log(
         return
     try:
         import mlflow
-        # Support both MLFLOW_TRACKING_* and DAGSHUB_* naming conventions
-        username = (
-            os.getenv("MLFLOW_TRACKING_USERNAME")
-            or os.getenv("DAGSHUB_USERNAME", "")
-        )
-        password = (
-            os.getenv("MLFLOW_TRACKING_PASSWORD")
-            or os.getenv("DAGSHUB_TOKEN", "")
-        )
-        if username:
-            os.environ["MLFLOW_TRACKING_USERNAME"] = username
-        if password:
-            os.environ["MLFLOW_TRACKING_PASSWORD"] = password
-        mlflow.set_tracking_uri(tracking_uri)
+
+        if "dagshub.com" in tracking_uri:
+            # dagshub.init() sets the tracking URI + auth in one call
+            import dagshub
+            # Parse owner/repo from https://dagshub.com/{owner}/{repo}.mlflow
+            path = tracking_uri.replace("https://dagshub.com/", "").replace(".mlflow", "").strip("/")
+            parts = path.split("/")
+            if len(parts) == 2:
+                owner, repo = parts
+                dagshub.init(
+                    repo_owner=owner,
+                    repo_name=repo,
+                    mlflow=True,
+                    token=os.getenv("DAGSHUB_TOKEN") or os.getenv("MLFLOW_TRACKING_PASSWORD"),
+                )
+        else:
+            # Standard MLflow server — manual auth
+            username = os.getenv("MLFLOW_TRACKING_USERNAME") or os.getenv("DAGSHUB_USERNAME", "")
+            password = os.getenv("MLFLOW_TRACKING_PASSWORD") or os.getenv("DAGSHUB_TOKEN", "")
+            if username:
+                os.environ["MLFLOW_TRACKING_USERNAME"] = username
+            if password:
+                os.environ["MLFLOW_TRACKING_PASSWORD"] = password
+            mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("stock-forecast-v2")
         with mlflow.start_run(run_name=ticker):
             mlflow.set_tag("ticker", ticker)
