@@ -40,6 +40,31 @@ if __name__ == "__main__":
         fetch_and_score()
         fetch_macro()
         train_and_forecast()
+
+        # Train TFT jointly on all tickers after initial XGBoost run
+        try:
+            from pipeline.tft_model import train_tft
+            from pipeline.model import load_features_for_ticker
+            from data.tickers import TICKERS
+            engine = get_engine()
+            print("[2/4] Training TFT model on all tickers (this may take a while)...")
+            all_data = {}
+            for t in TICKERS:
+                X, y = load_features_for_ticker(t, engine)
+                if not X.empty and len(X) >= 100:
+                    df_t = X.copy()
+                    df_t["target"] = y
+                    sig = pd.read_sql(
+                        f"SELECT date, close FROM signals WHERE ticker = '{t}'", con=engine
+                    )
+                    sig.set_index("date", inplace=True)
+                    df_t["close"] = sig.loc[df_t.index, "close"]
+                    all_data[t] = df_t
+            if all_data:
+                train_tft(all_data)
+                print("[2/4] TFT training complete.")
+        except Exception as e:
+            print(f"Warning: TFT training failed — {e}")
     else:
         print("[2/4] Database already contains data. Skipping initial fetch.")
 

@@ -51,8 +51,10 @@ def forecasting_node(state: AgentState) -> dict:
         updates["model_mape"] = res["mape"]
         updates["model_directional_accuracy"] = res["dir_acc"]
         updates["feature_importances"] = res["feature_importance"]
-        
         updates["forecast_confidence"] = classify_confidence(res["mape"], res["dir_acc"])
+        updates["xgb_forecast_price"] = res.get("xgb_forecast_price")
+        updates["tft_forecast_price"] = res.get("tft_forecast_price")
+        updates["tfm_forecast_price"] = res.get("tfm_forecast_price")
     else:
         # Fallback values
         updates["forecast_price"] = state["current_price"]
@@ -120,57 +122,104 @@ def _generate_forecast_from_existing(state: AgentState, model_path: str) -> dict
     """Helper to generate forecast from loaded model using the state data."""
     try:
         model = joblib.load(model_path)
-        
+        ticker = state["ticker"]
+
         signals_df = pd.DataFrame(state.get("signals_df", []))
         if not signals_df.empty and "date" in signals_df.columns:
             signals_df.set_index("date", inplace=True)
-            
+
         macro_df = pd.DataFrame(state.get("macro_df", []))
         if not macro_df.empty and "date" in macro_df.columns:
             macro_df.set_index("date", inplace=True)
-        
+
         df = signals_df.join(macro_df, how="left")
-        df["sentiment"] = state["sentiment_score"]
+        df["sentiment_score"] = state["sentiment_score"]
         df.ffill(inplace=True)
         df.bfill(inplace=True)
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        
-        # Compute actual test metrics instead of hardcoded placeholders
+
         TARGET = "target"
         df_clean = df.dropna(subset=FEATURES).copy()
         train_df = df_clean.dropna(subset=[TARGET]).copy()
-        
+
         if len(train_df) > 50:
             val_idx = int(len(train_df) * 0.85)
             X_test = train_df[FEATURES].iloc[val_idx:]
-            y_test = train_df[TARGET].iloc[val_idx:]
-            y_pred = model.predict(X_test)
-            
+            y_test = train_df[TARGET].iloc[val_idx:]   # log-returns
+            y_pred = model.predict(X_test)             # log-return predictions
+
             from sklearn.metrics import mean_absolute_percentage_error
             mape = mean_absolute_percentage_error(y_test, y_pred) * 100
-            
-            test_prev_close = train_df["close"].iloc[val_idx:].values
-            actual_dir = np.where(y_test.values > test_prev_close, 1, 0)
-            pred_dir = np.where(y_pred > test_prev_close, 1, 0)
-            dir_acc = np.mean(actual_dir == pred_dir) * 100
+
+            # Directional accuracy: positive log-return = UP
+            actual_dir = (y_test.values > 0).astype(int)
+            pred_dir   = (y_pred > 0).astype(int)
+            dir_acc    = float(np.mean(actual_dir == pred_dir) * 100)
         else:
             mape = 100.0
             dir_acc = 0.0
 
+        current_price = state["current_price"]
+
+        # Inference row: last row where target is NaN (no 30-day future yet)
         latest_features = df_clean[df_clean[TARGET].isna()][FEATURES]
         if latest_features.empty:
             latest_features = df_clean[FEATURES].iloc[[-1]]
-            
-        forecast_price = float(model.predict(latest_features.iloc[[-1]])[0])
-        current_price = state["current_price"]
-        
+
+        # Back-transform log-return → price
+        xgb_log_return = float(model.predict(latest_features.iloc[[-1]])[0])
+        xgb_price      = current_price * np.exp(xgb_log_return)
+
+        # TFT inference
+        tft_price = None
+        try:
+            from pipeline.tft_model import predict_tft
+            df_full = df_clean.copy()
+            if "close" not in df_full.columns and "close" in df.columns:
+                df_full["close"] = df["close"]
+            tft_log_return = predict_tft(ticker, df_full.copy())
+            if tft_log_return is not None:
+                tft_price = current_price * np.exp(tft_log_return)
+        except Exception as e:
+            print(f"[{ticker}] TFT inference skipped: {e}")
+
+        # TimesFM inference
+        tfm_price = None
+        try:
+            from pipeline.timesfm_model import predict_timesfm
+            close_col = df["close"] if "close" in df.columns else pd.Series(dtype=float)
+            if len(close_col) >= 64:
+                tfm_log_return = predict_timesfm(ticker, close_col.values)
+                if tfm_log_return is not None:
+                    tfm_price = current_price * np.exp(tfm_log_return)
+        except Exception as e:
+            print(f"[{ticker}] TimesFM inference skipped: {e}")
+
+        # Ensemble via meta-learner
+        try:
+            from pipeline.meta_learner import predict_ensemble
+            current_hurst = float(df_clean["hurst"].iloc[-1]) if "hurst" in df_clean.columns else 0.5
+            ensemble_price = predict_ensemble(
+                ticker=ticker,
+                xgb_price=xgb_price,
+                tft_price=tft_price,
+                tfm_price=tfm_price,
+                current_hurst=current_hurst,
+                current_price=current_price,
+            )
+        except Exception:
+            ensemble_price = xgb_price
+
         return {
-            "forecast_price": forecast_price,
-            "direction": "UP" if forecast_price > current_price else "DOWN",
-            "change_pct": round(((forecast_price - current_price) / current_price) * 100, 2),
-            "mape": round(mape, 2), 
-            "dir_acc": round(dir_acc, 2), 
-            "feature_importance": dict(zip(FEATURES, model.feature_importances_))
+            "forecast_price":     ensemble_price,
+            "xgb_forecast_price": xgb_price,
+            "tft_forecast_price": tft_price,
+            "tfm_forecast_price": tfm_price,
+            "direction":  "UP" if ensemble_price > current_price else "DOWN",
+            "change_pct": round(((ensemble_price - current_price) / current_price) * 100, 2),
+            "mape":    round(mape, 2),
+            "dir_acc": round(dir_acc, 2),
+            "feature_importance": dict(zip(FEATURES, model.feature_importances_)),
         }
     except Exception as e:
         print(f"Error loading model: {e}")

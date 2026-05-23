@@ -59,9 +59,9 @@ def run_pipeline_job():
 
 def weekly_retune_all():
     """
-    Runs full Optuna retuning (force=True) for all 100 stocks.
+    Runs full Optuna retuning (force=True) for all stocks then retrains TFT jointly.
     Scheduled weekly on Sunday at 02:00 IST.
-    Saves best params to tuned_params/ for use in daily fast retrains.
+    Saves best XGBoost params to tuned_params/ for use in daily fast retrains.
     """
     from data.tickers import TICKERS
     from data.db import get_engine
@@ -72,30 +72,36 @@ def weekly_retune_all():
     engine = get_engine()
     logger.info(f"[Scheduler] Weekly retune started for {len(TICKERS)} stocks")
 
+    all_data = {}
     for ticker in TICKERS.keys():
         try:
-            # Load feature matrix for this ticker
             X, y = load_features_for_ticker(ticker, engine)
             if len(X) < 100:
                 logger.info(f"[Scheduler] {ticker}: insufficient data, skipping")
                 continue
             tune_hyperparameters(ticker, X, y, force=True)
-            
-            from pipeline.lstm_model import train_lstm
 
-            try:
-                df_full = X.copy()
-                df_full['target'] = y
-                signals_df = pd.read_sql(f"SELECT date, close FROM signals WHERE ticker = '{ticker}'", con=engine)
-                signals_df.set_index("date", inplace=True)
-                df_full['close'] = signals_df.loc[df_full.index, 'close']
-                train_lstm(ticker, df_full.copy(), force=True)
-                logger.info(f"[Scheduler] {ticker}: LSTM retrained")
-            except Exception as e:
-                logger.error(f"[Scheduler] {ticker}: LSTM retrain failed — {e}")
+            df_full = X.copy()
+            df_full["target"] = y
+            signals_df = pd.read_sql(
+                f"SELECT date, close FROM signals WHERE ticker = '{ticker}'", con=engine
+            )
+            signals_df.set_index("date", inplace=True)
+            df_full["close"] = signals_df.loc[df_full.index, "close"]
+            all_data[ticker] = df_full
 
         except Exception as e:
             logger.error(f"[Scheduler] {ticker}: retuning failed — {e}")
+
+    # Retrain TFT jointly on all tickers (once per week)
+    try:
+        from pipeline.tft_model import train_tft
+        if all_data:
+            logger.info("[Scheduler] Starting weekly TFT retrain...")
+            train_tft(all_data, force=True)
+            logger.info("[Scheduler] TFT retrained successfully")
+    except Exception as e:
+        logger.error(f"[Scheduler] TFT retrain failed — {e}")
 
     logger.info("[Scheduler] Weekly retune complete")
 
