@@ -35,6 +35,13 @@ def _load_timesfm():
     if _tfm_instance is not None:
         return _tfm_instance
 
+    # Honour kill-switch for memory-constrained environments (e.g. Render free tier)
+    import os
+    if os.getenv("DISABLE_TIMESFM", "0") not in ("0", "", None):
+        _tfm_available = False
+        logger.info("[TimesFM] Disabled via DISABLE_TIMESFM env var.")
+        return None
+
     try:
         import timesfm
 

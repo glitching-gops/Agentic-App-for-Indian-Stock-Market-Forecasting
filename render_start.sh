@@ -6,7 +6,7 @@ echo "Port: $PORT"
 echo "Checking model files..."
 
 # Ensure models directory exists
-mkdir -p models/joblib models/lstm models/meta
+mkdir -p models/joblib models/lstm models/meta models/tft
 
 # Only download if models directory is empty
 if [ ! -f "models/joblib/RELIANCE.NS.joblib" ]; then
@@ -21,7 +21,7 @@ if [ ! -f "models/joblib/RELIANCE.NS.joblib" ]; then
     curl -L --http1.1 \
         -H "Authorization: token ${GITHUB_TOKEN}" \
         -H "Accept: application/vnd.github.v3.raw" \
-        "https://api.github.com/repos/glitching-gops/Agentic-Stock-Forecast/contents/models_store.zip?ref=model-store" \
+        "https://api.github.com/repos/glitching-gops/Agentic-App-for-Indian-Stock-Market-Forecasting/contents/models_store.zip?ref=model-store" \
         -o models_store.zip
 
     echo "Download complete. Size: $(du -h models_store.zip | cut -f1). Extracting..."

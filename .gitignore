@@ -31,6 +31,7 @@ ENV/
 models/joblib/
 models/lstm/
 models/meta/
+models/tft/
 # Logs
 logs/
 *.log
