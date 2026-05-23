@@ -3,11 +3,37 @@
 
 import yfinance as yf
 import pandas as pd
+import pandera as pa
+from pandera import Column, DataFrameSchema, Check
 from data.db import get_engine
 from data.tickers import TICKERS
 
 PERIOD = "2y"
 INTERVAL = "1d"
+MIN_ROWS = 20
+
+# Schema applied to every ticker's OHLCV DataFrame before it is written to the DB.
+# Validation failures are non-fatal: a warning is printed and the data is still
+# stored so a single bad ticker doesn't abort the full 53-ticker run.
+# The one hard gate is MIN_ROWS — fewer than 20 rows cannot produce any signals.
+_OHLCV_SCHEMA = DataFrameSchema(
+    columns={
+        "date":   Column(str,   nullable=False),
+        "ticker": Column(str,   nullable=False),
+        "open":   Column(float, Check.gt(0), nullable=False),
+        "high":   Column(float, Check.gt(0), nullable=False),
+        "low":    Column(float, Check.gt(0), nullable=False),
+        "close":  Column(float, Check.gt(0), nullable=False),
+        "volume": Column(float, Check.ge(0), nullable=True),
+    },
+    checks=[
+        Check(
+            lambda df: (df["high"] >= df["low"]).all(),
+            error="high < low in one or more rows",
+        ),
+    ],
+    coerce=True,
+)
 
 def fetch_and_store(single_ticker=None):
     engine = get_engine()
@@ -48,6 +74,18 @@ def fetch_and_store(single_ticker=None):
                 
             df = df[["date", "ticker", "open", "high", "low", "close", "volume"]]
             df.dropna(inplace=True)
+
+            # Hard gate: too few rows to compute any signals
+            if len(df) < MIN_ROWS:
+                print(f"[Fetch] {ticker}: only {len(df)} rows — skipping (need {MIN_ROWS}+)")
+                continue
+
+            # Pandera data quality check — warns on schema violations, doesn't abort
+            try:
+                _OHLCV_SCHEMA.validate(df, lazy=True)
+            except pa.errors.SchemaErrors as exc:
+                samples = exc.failure_cases[["check", "failure_case"]].head(3).to_dict("records")
+                print(f"[Fetch] {ticker}: data quality warning — {samples} (storing anyway)")
 
             # Check existing records to avoid duplicates
             existing_dates = pd.read_sql(

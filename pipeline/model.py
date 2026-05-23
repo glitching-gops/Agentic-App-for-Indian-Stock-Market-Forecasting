@@ -11,11 +11,59 @@ from sqlalchemy import text
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_percentage_error
 from data.db import get_engine
-from data.tickers import TICKERS
+from data.tickers import TICKERS, get_sector
 from pipeline.tuning import tune_hyperparameters, expanding_window_cv
 from pipeline.tft_model import predict_tft
 from pipeline.timesfm_model import predict_timesfm
 from pipeline.meta_learner import train_meta_learner, predict_ensemble
+
+def _mlflow_log(
+    ticker: str,
+    best_params: dict,
+    cv_mape: float,
+    directional_accuracy: float,
+    ensemble_mape: float,
+    ensemble_dir_acc: float,
+    model_path: str,
+) -> None:
+    """
+    Logs one training run to MLflow.  Completely silent if MLFLOW_TRACKING_URI
+    is not set — the pipeline never depends on this succeeding.
+    """
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()
+    if not tracking_uri:
+        return
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment("stock-forecast-v2")
+        with mlflow.start_run(run_name=ticker):
+            mlflow.set_tag("ticker", ticker)
+            mlflow.set_tag("sector", get_sector(ticker))
+            mlflow.set_tag("training_date", datetime.utcnow().strftime("%Y-%m-%d"))
+            # Hyperparams (skip infrastructure keys)
+            mlflow.log_params({
+                k: v for k, v in best_params.items()
+                if k not in ("tree_method", "device")
+            })
+            # Metrics
+            mlflow.log_metrics({
+                "xgb_cv_mape":      round(cv_mape, 4),
+                "xgb_dir_acc":      round(directional_accuracy, 4),
+                "ensemble_mape":    round(ensemble_mape, 4),
+                "ensemble_dir_acc": round(ensemble_dir_acc, 4),
+            })
+            # Trained model artifact
+            mlflow.log_artifact(model_path, artifact_path="models/joblib")
+            meta_path = os.path.join(
+                os.path.dirname(__file__), "..", "models", "meta",
+                f"{ticker.replace('.', '_')}_meta.joblib",
+            )
+            if os.path.exists(meta_path):
+                mlflow.log_artifact(meta_path, artifact_path="models/meta")
+    except Exception as e:
+        print(f"[MLflow] {ticker}: logging failed — {e}")
+
 
 FEATURES = [
     # Technical signals (20)
@@ -264,6 +312,17 @@ def _train_single_ticker(ticker: str, engine) -> dict | None:
             },
         )
         conn.commit()
+
+    # ── MLflow run logging (opt-in — only when MLFLOW_TRACKING_URI is set) ──────
+    _mlflow_log(
+        ticker=ticker,
+        best_params=best_params,
+        cv_mape=cv_mape,
+        directional_accuracy=directional_accuracy,
+        ensemble_mape=ensemble_mape,
+        ensemble_dir_acc=ensemble_dir_acc,
+        model_path=model_path,
+    )
 
     return {
         "current_price": current_price,
