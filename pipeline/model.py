@@ -158,6 +158,18 @@ def load_features_for_ticker(ticker: str, engine):
     if len(df) < 50:
         return pd.DataFrame(), pd.Series()
 
+    # Drop rows whose target looks like an absolute price rather than a log-return.
+    # Valid 30-day log-returns for Indian equities are comfortably within [-3, 3]
+    # (±200%+ daily is impossible). Values outside this range are pre-v2 stale data.
+    valid_target = df[TARGET].between(-3.0, 3.0) | df[TARGET].isna()
+    n_stale = int((~valid_target).sum())
+    if n_stale:
+        print(f"[Model] {ticker}: dropping {n_stale} rows with pre-v2 absolute-price targets")
+        df = df[valid_target]
+
+    if len(df) < 50:
+        return pd.DataFrame(), pd.Series()
+
     return df[FEATURES], df[TARGET]
 
 
@@ -218,7 +230,8 @@ def _train_single_ticker(ticker: str, engine) -> dict | None:
         current_price = float(signals_df.iloc[-1]["close"])
 
     # Back-transform: price = current_price * exp(log_return)
-    xgb_log_return = float(model.predict(latest_row)[0])
+    # Clip to [-2, 2] (±200%) so a corrupted prediction never overflows exp()
+    xgb_log_return = float(np.clip(model.predict(latest_row)[0], -2.0, 2.0))
     xgb_price = current_price * np.exp(xgb_log_return)
 
     # ── TFT ──────────────────────────────────────────────────────────────────
@@ -247,8 +260,8 @@ def _train_single_ticker(ticker: str, engine) -> dict | None:
     # Build val-set TFT/TimesFM preds for meta-learner training
     # Approximate: use xgb_val_preds back-transformed for unavailable models
     val_close = signals_df.loc[y_test.index, "close"].values
-    xgb_val_prices = val_close * np.exp(xgb_val_preds)
-    y_val_prices = val_close * np.exp(y_test.values)
+    xgb_val_prices = val_close * np.exp(np.clip(xgb_val_preds, -2.0, 2.0))
+    y_val_prices   = val_close * np.exp(np.clip(y_test.values,  -2.0, 2.0))
 
     # Placeholder val predictions for TFT/TimesFM when not yet available per-row
     tft_val_prices = xgb_val_prices   # fallback; overwritten when TFT has val preds
