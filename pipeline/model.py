@@ -35,6 +35,19 @@ def _mlflow_log(
         return
     try:
         import mlflow
+        # Support both MLFLOW_TRACKING_* and DAGSHUB_* naming conventions
+        username = (
+            os.getenv("MLFLOW_TRACKING_USERNAME")
+            or os.getenv("DAGSHUB_USERNAME", "")
+        )
+        password = (
+            os.getenv("MLFLOW_TRACKING_PASSWORD")
+            or os.getenv("DAGSHUB_TOKEN", "")
+        )
+        if username:
+            os.environ["MLFLOW_TRACKING_USERNAME"] = username
+        if password:
+            os.environ["MLFLOW_TRACKING_PASSWORD"] = password
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment("stock-forecast-v2")
         with mlflow.start_run(run_name=ticker):
