@@ -1,7 +1,24 @@
 """
-graph.py
-LangGraph orchestration for the Stock Forecast v3 pipeline.
+agents/graph.py
+
+LangGraph orchestration for the Stock Forecast v2 pipeline.
+
+Graph structure:
+  START ──► trading_data  ─────────────────────────────►
+                                                         forecasting ──► critic
+  START ──► external_data ─────────────────────────────►
+                                                              │
+                    ┌─── REJECTED + reflection_count < 2 ◄───┘
+                    │         (loop back to forecasting
+                    │          with critic_feedback injected)
+                    └─── APPROVED / FLAGGED / exhausted ──► END
+
+The reflection loop gives the Critic Agent real agency: a REJECTED forecast
+triggers a retry where the forecasting node receives the critic's flags as
+additional context and can adjust its narrative.  Maximum 2 retries to
+prevent infinite loops.
 """
+
 from langgraph.graph import StateGraph, START, END
 from agents.state import AgentState
 from agents.trading_data_agent import trading_data_node
@@ -9,6 +26,40 @@ from agents.external_data_agent import external_data_node
 from agents.forecasting_agent import forecasting_node
 from agents.critic_agent import critic_node
 from data.tickers import TICKERS
+
+MAX_REFLECTIONS = 2
+
+
+def _should_reflect(state: AgentState) -> str:
+    """
+    Routing function called after the critic node.
+
+    Returns "reflect" if the forecast was REJECTED and we haven't hit the
+    reflection limit yet, otherwise "end".
+    """
+    verdict = state.get("critic_verdict", "FLAGGED")
+    count   = state.get("reflection_count", 0)
+
+    if verdict == "REJECTED" and count < MAX_REFLECTIONS:
+        return "reflect"
+    return "end"
+
+
+def _reflection_node(state: AgentState) -> dict:
+    """
+    Prepares the state for a forecasting retry by:
+      1. Incrementing reflection_count
+      2. Copying critic_reasoning into critic_feedback so the
+         forecasting node can see why the previous attempt was rejected
+      3. Clearing the stale critic fields so the next critic pass is fresh
+    """
+    return {
+        "reflection_count": state.get("reflection_count", 0) + 1,
+        "critic_feedback":  state.get("critic_reasoning", ""),
+        "critic_verdict":   "FLAGGED",   # reset so routing doesn't loop on stale value
+        "critic_flags":     [],
+    }
+
 
 def compute_composite_score(
     upside_pct: float,
@@ -20,44 +71,22 @@ def compute_composite_score(
     Computes the composite leaderboard score out of 100.
 
     Components:
-      - Directional accuracy (30 pts): most actionable signal
-      - Forecast upside potential (25 pts): expected return
-      - Critic verdict (30 pts): quality gate
-      - Model confidence (15 pts): ensemble reliability
-
-    Args:
-        upside_pct:           forecast change % (e.g. 5.2 for 5.2%)
-        verdict:              APPROVED / FLAGGED / REJECTED
-        confidence:           High / Medium / Low
-        directional_accuracy: model directional accuracy 0-100
-
-    Returns:
-        composite score 0-100 (float, rounded to 2dp)
+      - Directional accuracy (30 pts) — primary signal quality measure
+      - Critic verdict       (30 pts) — quality gate
+      - Forecast upside      (25 pts) — expected return potential
+      - Model confidence     (15 pts) — ensemble reliability
     """
-    # Directional accuracy — linear 0 to 30
-    dir_score = (min(max(directional_accuracy, 0.0), 100.0) / 100.0) * 30.0
-
-    # Upside score — capped at 25 points
-    # multiplier 1.5 means 16.7% upside = max score
-    upside_score = min(max(upside_pct * 1.5, 0.0), 25.0)
-
-    # Verdict score
-    verdict_score = {"APPROVED": 30.0, "FLAGGED": 12.0, "REJECTED": 0.0}.get(
-        verdict, 12.0
-    )
-
-    # Confidence score
-    conf_score = {"High": 15.0, "Medium": 7.0, "Low": 0.0}.get(
-        confidence, 0.0
-    )
-
+    dir_score     = (min(max(directional_accuracy, 0.0), 100.0) / 100.0) * 30.0
+    upside_score  = min(max(upside_pct * 1.5, 0.0), 25.0)
+    verdict_score = {"APPROVED": 30.0, "FLAGGED": 12.0, "REJECTED": 0.0}.get(verdict, 12.0)
+    conf_score    = {"High": 15.0, "Medium": 7.0, "Low": 0.0}.get(confidence, 0.0)
     return round(dir_score + upside_score + verdict_score + conf_score, 2)
+
 
 def save_forecast_to_db(state: dict):
     """
     Saves the completed agent pipeline state to the forecasts
-    and leaderboard tables in the database.
-    Called automatically at the end of run_graph().
+    and leaderboard tables.  Called at the end of run_graph().
     """
     import json
     from data.db import get_engine
@@ -68,7 +97,6 @@ def save_forecast_to_db(state: dict):
     engine = get_engine()
     ticker = state.get("ticker", "")
 
-    # Compute composite score
     upside_pct = state.get("forecast_change_pct", 0)
     verdict    = state.get("critic_verdict", "FLAGGED")
     confidence = state.get("forecast_confidence", "Low")
@@ -83,7 +111,6 @@ def save_forecast_to_db(state: dict):
     now = datetime.utcnow()
 
     with engine.connect() as conn:
-        # Insert into forecasts table (keep full history)
         conn.execute(text("""
             INSERT INTO forecasts (
                 ticker, company, sector, current_price, forecast_price,
@@ -117,7 +144,6 @@ def save_forecast_to_db(state: dict):
             "last_updated":                 now,
         })
 
-        # Upsert into leaderboard table (one row per ticker, always current)
         try:
             conn.execute(text("""
                 INSERT INTO leaderboard (
@@ -156,7 +182,6 @@ def save_forecast_to_db(state: dict):
                 "last_updated":         now,
             })
         except Exception:
-            # Fallback for local SQLite development
             conn.execute(text("""
                 INSERT OR REPLACE INTO leaderboard (
                     ticker, company, sector, current_price, forecast_price,
@@ -184,34 +209,45 @@ def save_forecast_to_db(state: dict):
 
         conn.commit()
 
+
 def build_graph():
     workflow = StateGraph(AgentState)
-    
-    # Add nodes
-    workflow.add_node("trading_data", trading_data_node)
+
+    workflow.add_node("trading_data",  trading_data_node)
     workflow.add_node("external_data", external_data_node)
-    workflow.add_node("forecasting", forecasting_node)
-    workflow.add_node("critic", critic_node)
-    
-    # Add edges
+    workflow.add_node("forecasting",   forecasting_node)
+    workflow.add_node("critic",        critic_node)
+    workflow.add_node("reflection",    _reflection_node)
+
+    # Parallel data fetch
     workflow.add_edge(START, "trading_data")
     workflow.add_edge(START, "external_data")
-    
-    # Forecasting waits for both parallel data nodes
+
+    # Both data nodes must complete before forecasting
     workflow.add_edge(["trading_data", "external_data"], "forecasting")
-    
+
     workflow.add_edge("forecasting", "critic")
-    workflow.add_edge("critic", END)
-    
+
+    # Conditional: reflect (loop) or end
+    workflow.add_conditional_edges(
+        "critic",
+        _should_reflect,
+        {"reflect": "reflection", "end": END},
+    )
+
+    # After reflection, go back to forecasting with updated state
+    workflow.add_edge("reflection", "forecasting")
+
     return workflow.compile()
+
 
 graph = build_graph()
 
+
 def run_graph(ticker: str) -> dict:
     print(f"\n--- Running Agent Graph for {ticker} ---")
-    
+
     try:
-        # Initialize state
         initial_state = AgentState(
             ticker=ticker,
             company_name=TICKERS.get(ticker, {}).get("company", ticker),
@@ -228,17 +264,28 @@ def run_graph(ticker: str) -> dict:
             model_directional_accuracy=0.0,
             feature_importances={},
             signal_narrative="",
+            forecast_price_q10=None,
+            forecast_price_q90=None,
+            xgb_forecast_price=None,
+            tft_forecast_price=None,
+            tfm_forecast_price=None,
             critic_verdict="FLAGGED",
             critic_reasoning="",
             critic_flags=[],
-            critic_confidence_adjustment="MAINTAINED"
+            critic_confidence_adjustment="MAINTAINED",
+            reflection_count=0,
+            critic_feedback="",
         )
-        
+
         final_state = graph.invoke(initial_state)
         save_forecast_to_db(final_state)
+
+        reflections = final_state.get("reflection_count", 0)
+        if reflections > 0:
+            print(f"--- {ticker}: {reflections} reflection(s) performed ---")
         print(f"--- Completed Agent Graph for {ticker} ---\n")
         return final_state
-        
+
     except Exception as e:
         safe_err = str(e).encode("ascii", "backslashreplace").decode("ascii")
         print(f"--- FAILED Agent Graph for {ticker}: {safe_err} ---\n")
@@ -257,5 +304,6 @@ def run_graph(ticker: str) -> dict:
             "critic_verdict": "REJECTED",
             "critic_reasoning": f"Catastrophic Graph Failure: {safe_err}",
             "critic_flags": ["Pipeline Error"],
-            "critic_confidence_adjustment": "DOWNGRADED"
+            "critic_confidence_adjustment": "DOWNGRADED",
+            "reflection_count": 0,
         }

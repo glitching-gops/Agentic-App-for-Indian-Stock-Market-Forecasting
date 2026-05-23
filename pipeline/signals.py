@@ -296,11 +296,13 @@ def compute_and_store(single_ticker=None):
         # Earnings surprise — Track A
         df = compute_earnings_surprise(ticker, df)
 
-        # ── Target: closing price 30 days forward ───────────────────────────────
-
+        # ── Target: 30-day log-return ────────────────────────────────────────────
+        # log(close_t+30 / close_t) — stationary, back-transformed to price at inference.
+        # Predicting returns rather than absolute prices removes non-stationarity
+        # and prevents the model from learning price-level trends as signal.
 
         df = df.sort_values("date", ascending=True).reset_index(drop=True)
-        df["target"] = df["close"].shift(-30)
+        df["target"] = np.log(df["close"].shift(-30) / df["close"])
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
         feature_cols = ["rsi", "macd_hist", "bb_width", "obv", "sma_20", "ema_50", "bb_upper", "bb_lower", "ema_9", "ema_21",
                        "atr_14", "stoch_k", "williams_r", "roc_10", "vroc_10", "prox_52w", 

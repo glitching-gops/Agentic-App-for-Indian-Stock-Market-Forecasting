@@ -164,7 +164,8 @@ def tune_hyperparameters(
         return expanding_window_cv(X, y, params)
 
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    # n_jobs=-1 runs trials in parallel using all available CPU cores
+    study.optimize(objective, n_trials=n_trials, n_jobs=-1, show_progress_bar=False)
 
     best_params = study.best_params
     best_params["tree_method"] = "hist"
